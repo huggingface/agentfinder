@@ -63,6 +63,11 @@ The Release Please workflow then builds artifacts, publishes them to PyPI with t
 the Hugging Face Space when the `HF_TOKEN` secret is configured. The tag-based release
 workflow remains available for manually pushed `v*` tags.
 
+Release Please needs permission to create pull requests. Enable GitHub Actions read/write
+workflow permissions and "Allow GitHub Actions to create and approve pull requests" in the
+repository settings, or configure a `RELEASE_PLEASE_TOKEN` secret containing a fine-grained
+GitHub token with repository contents, pull request, and issue write permissions.
+
 ### Hugging Face Space Deployment
 
 The project includes a reproducible Docker Space definition in `deploy/huggingface-space/`.
