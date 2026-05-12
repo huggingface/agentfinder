@@ -76,7 +76,8 @@ with the built-in `GITHUB_TOKEN` do not trigger subsequent GitHub Actions workfl
 The project includes a reproducible Docker Space definition in `deploy/huggingface-space/`.
 It uses the official uv Python image and runs the latest published `hf-agentfinder` package
 with `uvx --refresh`, so restarting or rebuilding the Space resolves the newest PyPI
-release without committing generated application code to the Space repository.
+release without committing generated application code to the Space repository. This keeps
+the hosted Space lightweight while letting PyPI releases drive runtime updates.
 
 ## Usage
 
