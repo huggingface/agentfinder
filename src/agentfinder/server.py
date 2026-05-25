@@ -125,13 +125,20 @@ def _health_payload(search_skills: SearchSkills) -> dict[str, object]:
     return {
         "status": "ok",
         "registries": {
+            "huggingface": {
+                "configured": _skills_configured(search_skills),
+                "path": "/search",
+                "description": "Combined Hugging Face Skills and Spaces search.",
+            },
             "huggingface/skills": {
                 "configured": _skills_configured(search_skills),
                 "path": "/search",
+                "description": "Included in the combined root registry.",
             },
             "huggingface/spaces": {
                 "configured": True,
                 "path": "/registries/huggingface/spaces/search",
+                "description": "Targeted Spaces-only nested registry.",
             },
         },
     }
@@ -186,17 +193,35 @@ def search_agent_finder(
     request: SearchRequest,
     *,
     base_url: str = "http://127.0.0.1:8080",
+    include_non_running: bool = False,
+    token: bool | str | None = None,
     search_skills: SearchSkills = search_hf_skills,
+    search_spaces: SearchSpaces = search_hf_spaces,
 ) -> SearchResponse:
     results: list[SearchResult] = []
+    kind = _result_kind(request.query.mediaType)
+    if kind is None:
+        return SearchResponse(results=[])
+
     if request.query.mediaType in {None, AI_SKILL_MEDIA_TYPE}:
-        results = search_skills(request.query.text, limit=request.pageSize)
+        results.extend(search_skills(request.query.text, limit=request.pageSize))
+    results.extend(
+        search_spaces(
+            request.query.text,
+            limit=request.pageSize,
+            include_non_running=include_non_running,
+            token=token,
+            kind=kind,
+            base_url=base_url,
+        )
+    )
+    results.sort(key=lambda result: result.score, reverse=True)
 
     referrals = []
     if request.query.federation in {"auto", "referrals"}:
         referrals.append(_spaces_registry_referral(base_url))
 
-    return SearchResponse(results=results, referrals=referrals)
+    return SearchResponse(results=results[: request.pageSize], referrals=referrals)
 
 
 def search_spaces_agent_finder(
@@ -314,20 +339,60 @@ def create_app(
         response_model=SearchResponse,
         response_model_exclude_none=True,
         response_model_exclude_defaults=True,
-        summary="Search Hugging Face Skills",
+        summary="Search Hugging Face Skills and Spaces",
         description=(
-            "Search indexed Hugging Face Skills through the Agent Finder search envelope. "
-            "Use `federation=referrals` to discover the nested Hugging Face Spaces registry."
+            "Search indexed Hugging Face Skills and running Hugging Face Spaces through one "
+            "Agent Finder search envelope. The nested Spaces registry remains available for "
+            "clients that want targeted Spaces-only search or explicit federation traversal."
         ),
     )
     async def search(
         request_body: Annotated[SearchRequest, Body(openapi_examples=SEARCH_REQUEST_EXAMPLES)],
         request: Request,
+        x_hf_authorization: Annotated[
+            str | None,
+            Header(
+                alias="X-HF-Authorization",
+                description=(
+                    "Optional request-scoped Hugging Face token for the Spaces portion of "
+                    "combined search. Use `Bearer hf_...`. Highest precedence."
+                ),
+            ),
+        ] = None,
+        authorization: Annotated[
+            str | None,
+            Header(
+                alias="Authorization",
+                description=(
+                    "Optional request-scoped Hugging Face token for the Spaces portion of "
+                    "combined search. Use `Bearer hf_...`. Used when `X-HF-Authorization` is "
+                    "absent."
+                ),
+            ),
+        ] = None,
+        hf_token: Annotated[
+            str | None,
+            Header(
+                alias="HF_TOKEN",
+                description=(
+                    "Optional request-scoped Hugging Face token without a Bearer prefix for "
+                    "the Spaces portion of combined search. Used when authorization headers "
+                    "are absent."
+                ),
+            ),
+        ] = None,
     ) -> SearchResponse:
+        _ = x_hf_authorization, authorization, hf_token
         return search_agent_finder(
             request_body,
             base_url=_base_url(request),
+            include_non_running=include_non_running,
+            token=effective_hf_token(
+                request_token=hf_token_from_headers(request.headers),
+                configured_token=token,
+            ),
             search_skills=search_skills,
+            search_spaces=search_spaces,
         )
 
     _add_spaces_search_route(

@@ -22,7 +22,8 @@ container start:
 The startup wrapper can run a vendored Meilisearch binary from an attached bucket and load
 the generated Hugging Face Skills index before starting the Agent Finder API. If the
 Meilisearch bucket or skills index artifact is not mounted, the Space still starts and the
-nested Hugging Face Spaces registry remains available.
+combined primary search still returns Hugging Face Spaces results; indexed Skills results
+are added when Meilisearch is available.
 
 Plain deployment sketch:
 
@@ -53,8 +54,8 @@ Expected runtime variables:
 Useful endpoints:
 
 - `GET /health`
-- `POST /search` for indexed Hugging Face Skills
-- `POST /registries/huggingface/spaces/search` for Hugging Face Spaces
+- `POST /search` for combined indexed Hugging Face Skills and Hugging Face Spaces
+- `POST /registries/huggingface/spaces/search` for targeted Hugging Face Spaces search
 - `GET /docs`
 - `GET /skills/huggingface/{owner}/{space}/SKILL.md`
 - `GET /spaces/huggingface/{owner}/{space}/agents.md`

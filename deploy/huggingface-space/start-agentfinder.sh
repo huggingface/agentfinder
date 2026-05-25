@@ -184,6 +184,14 @@ def wait(task):
 
 
 wait(request("DELETE", f"/indexes/{index}"))
+wait(
+    request(
+        "POST",
+        "/indexes",
+        data=json.dumps({"uid": index, "primaryKey": "id"}).encode(),
+        content_type="application/json",
+    )
+)
 wait(request("PATCH", f"/indexes/{index}/settings", data=json.dumps(settings).encode(), content_type="application/json"))
 wait(
     request(

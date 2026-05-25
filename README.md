@@ -4,27 +4,29 @@ A small Agent Finder registry adapter for Hugging Face Skills and Spaces.
 
 It exposes Hugging Face discovery as:
 
-- a CLI: `agentfinder spaces search "remove background from image"`
+- a CLI: `agentfinder search "remove background from image"`
 - version introspection: `agentfinder --version`
 - a hosted Agent Finder registry client: `agentfinder search "remove background from image"`
 - a generic Agent Finder registry client: `agentfinder search --registry-url https://registry.example "remove background from image"`
-- a primary Agent Finder REST API for indexed Hugging Face Skills: `POST /search`
-- a nested Hugging Face Spaces registry: `POST /registries/huggingface/spaces/search`
+- a primary Agent Finder REST API combining indexed Hugging Face Skills and Hugging Face
+  Spaces: `POST /search`
+- a targeted nested Hugging Face Spaces registry: `POST /registries/huggingface/spaces/search`
 - generated skill artifacts for Spaces via `GET /skills/huggingface/{owner}/{space}/SKILL.md`
 
-The hosted REST API treats indexed Hugging Face Skills as the primary registry. The nested
-Spaces registry preserves the generated `SKILL.md` route that wraps a Space's `agents.md`
-instructions.
+The hosted REST API combines Skills and Spaces in the primary registry so simple clients
+only need to call `POST /search`. The nested Spaces registry remains available for clients
+that want targeted Spaces-only discovery or explicit registry traversal.
 
 ## Features
 
 ### Space Search and Skill Generation
 
-`agentfinder` exposes Hugging Face Spaces semantic search as a nested registry backend at
-`/registries/huggingface/spaces/search`. Search requests use the Hub's agent-oriented
-semantic search (`agents=true`) and return matching Spaces as Agent Finder catalog entries.
-By default, results can include generated `application/ai-skill` artifacts, plus
-`application/mcp-server+json` entries for matching Spaces tagged `mcp-server`.
+`agentfinder` exposes Hugging Face Spaces semantic search in the primary `/search` endpoint
+and as a targeted nested registry backend at `/registries/huggingface/spaces/search`.
+Search requests use the Hub's agent-oriented semantic search (`agents=true`) and return
+matching Spaces as Agent Finder catalog entries. By default, results can include generated
+`application/ai-skill` artifacts, plus `application/mcp-server+json` entries for matching
+Spaces tagged `mcp-server`.
 
 Search responses strictly include only Spaces whose runtime stage is `RUNNING`, so returned
 entries are limited to Spaces that are currently ready to serve traffic. The runtime stage
@@ -35,9 +37,9 @@ frontmatter (`name` and `description`) plus source metadata such as the Space ID
 app URL, and original `agents.md` URL. This lets clients discover a relevant Space, fetch
 the generated skill, and install or load it using their normal skill flow.
 
-For clients that want raw Space descriptors instead of skills, the nested Spaces search
-endpoint can return `application/vnd.huggingface.space+json` entries with inline JSON
-metadata.
+For clients that want raw Space descriptors instead of skills, request
+`application/vnd.huggingface.space+json` from either the primary search endpoint or the
+nested Spaces search endpoint.
 
 Requests for `application/mcp-server+json` add `filter=mcp-server` to the downstream Hub
 search and return MCP server catalog entries that point at the Space's Gradio MCP endpoint
@@ -52,17 +54,21 @@ base URL or the `/search` endpoint. In this mode the CLI POSTs an Agent Finder
 paths as the Hugging Face Spaces adapter. Pass `--local` to search directly from the
 current process instead.
 
-### Skills Registry and Referrals
+### Combined Skills and Spaces Registry
 
-The primary HTTP `POST /search` endpoint searches the Meilisearch-backed
-`huggingface/skills` index when `AGENTFINDER_MEILI_URL` is configured. It returns
-`application/ai-skill` catalog entries sourced from indexed `SKILL.md` artifacts and groups
-section-level index hits into skill-level search results.
+The primary HTTP `POST /search` endpoint combines the Meilisearch-backed
+`huggingface/skills` index with Hugging Face Spaces search. For omitted media type or
+`application/ai-skill`, it can return both indexed `SKILL.md` artifacts and generated Space
+skills in one ranked response. Section-level Skills index hits are grouped into skill-level
+search results.
+
+For `application/vnd.huggingface.space+json` and `application/mcp-server+json`, primary
+search routes directly to the Spaces backend because those media types are Space-specific.
 
 When clients request referrals with `query.federation` set to `referrals` or `auto`, the
-primary registry includes a referral to the nested Hugging Face Spaces registry. This keeps
-the single Space deployment simple while still modeling Spaces as a secondary Agent Finder
-registry.
+primary registry can still include a referral to the nested Hugging Face Spaces registry.
+Simple clients can ignore referrals and use the combined results; traversal-capable clients
+can use the referral for a follow-up Spaces-only search.
 
 ### Challenge Registry Server
 
@@ -74,11 +80,18 @@ artifacts without relying on Hugging Face or Meilisearch services.
 
 `agentfinder challenge search` queries a running challenge registry and defaults to
 requesting referrals, making it a convenient CLI path for agents that need to practice
-Agent Finder traversal. The generic `agentfinder search` and `agentfinder spaces search`
-commands default to the hosted deployment and also accept `--registry-url` and `--federation
-none|referrals|auto`. When those registry-backed commands are run with `--json`, the CLI
-prints the registry's raw `SearchResponse` body so clients can inspect exact `results`,
-`referrals`, `mediaType`, `url`, `data`, and `pageToken` fields returned by the server.
+Agent Finder traversal. The generic `agentfinder search` command defaults to the hosted
+deployment and also accepts `--registry-url` and `--federation none|referrals|auto`. When
+registry-backed commands are run with `--json`, the CLI prints the registry's raw
+`SearchResponse` body so clients can inspect exact `results`, `referrals`, `mediaType`,
+`url`, `data`, and `pageToken` fields returned by the server.
+
+### Specification References
+
+`spec/agentfinder.md` remains the local Agent Finder source-of-truth. The AI Catalog draft
+reference can be refreshed from the upstream `Agent-Card/ai-catalog` repository with
+`./scripts/update-ai-catalog-spec.sh`, which copies the latest Markdown and JSON assets
+from its `specification/` folder into `spec/ai-catalog/`.
 
 ### Release Automation
 
@@ -119,10 +132,10 @@ the hosted Space lightweight while letting PyPI releases drive runtime updates.
 The Space startup wrapper can optionally run a pinned Meilisearch binary from an attached
 Hugging Face bucket and ingest a generated Hugging Face Skills index artifact from another
 attached bucket. When Meilisearch starts successfully, the wrapper exports the configured
-Meilisearch URL and index for the API process so `POST /search` uses the loaded skills
-index. Helper scripts in `scripts/` vendor the pinned Meilisearch binary, create the
-configured buckets, attach them as Space volumes, and configure runtime variables without
-running unsupervised installer scripts in the Space.
+Meilisearch URL and index for the API process so `POST /search` includes loaded Skills
+results alongside Spaces results. Helper scripts in `scripts/` vendor the pinned
+Meilisearch binary, create the configured buckets, attach them as Space volumes, and
+configure runtime variables without running unsupervised installer scripts in the Space.
 
 The documentation here is intentionally an orientation record: it states the deployment
 idea and points to the artifacts that contain the operational evidence. For details, read
@@ -137,12 +150,11 @@ The examples below use the standalone `agentfinder` command form.
 ```bash
 > agentfinder --version
 > agentfinder search "generate image" --limit 5
-> agentfinder spaces search "generate image" --limit 5
-> agentfinder spaces search "generate image" --kind skill --json
-> agentfinder spaces search "generate image" --kind mcp --json
-> agentfinder spaces search "generate image" --json
+> agentfinder search "generate image" --kind skill --json
+> agentfinder search "generate image" --kind space --json
+> agentfinder search "generate image" --kind mcp --json
 > agentfinder search --registry-url https://registry.example "generate image" --kind skill --json
-> agentfinder spaces search "generate image" --local
+> agentfinder search "generate image" --kind space --local
 > agentfinder serve --port 8080
 > agentfinder challenge serve --port 8090
 > agentfinder challenge search "find tools and registries" --federation referrals --json
@@ -155,7 +167,7 @@ For Hugging Face CLI users, the recommended install path is as an `hf` extension
 ```bash
 > hf extensions install huggingface/hf-agentfinder
 > hf agentfinder --version
-> hf agentfinder spaces search "generate image" --limit 5
+> hf agentfinder search "generate image" --kind space --limit 5
 ```
 
 The project still documents examples as `agentfinder ...` because the same CLI is also
@@ -168,7 +180,7 @@ available as a standalone Python console script. When installed as an extension,
   -d '{"query":{"text":"upload files to a dataset repo","mediaType":"application/ai-skill"},"pageSize":5}'
 ```
 
-Search the nested Spaces registry:
+Search the targeted nested Spaces registry:
 
 ```bash
 > curl -X POST http://localhost:8080/registries/huggingface/spaces/search \
@@ -198,7 +210,8 @@ To get generic Hugging Face Space descriptors instead of skill wrappers, request
 
 ### HF_TOKEN handling
 
-Nested Spaces registry search requests can forward a request-scoped Hugging Face token for
-the downstream Spaces search call. The server checks `X-HF-Authorization: Bearer ...`, then
-`Authorization: Bearer ...`, then `HF_TOKEN: ...`; a header token overrides any token
-configured when the server starts and is not stored beyond the request.
+Primary and nested Spaces registry search requests can forward a request-scoped Hugging
+Face token for the downstream Spaces search call. The server checks
+`X-HF-Authorization: Bearer ...`, then `Authorization: Bearer ...`, then `HF_TOKEN: ...`;
+a header token overrides any token configured when the server starts and is not stored
+beyond the request.

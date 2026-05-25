@@ -66,7 +66,7 @@ spaces_response="$(
     "${BASE_URL}/registries/huggingface/spaces/search" \
     '{"query":{"text":"remove background from image","mediaType":"application/ai-skill"},"pageSize":3}'
 )"
-assert_jq "${spaces_response}" '.results | length > 0' "spaces search returns results"
+assert_jq "${spaces_response}" '.results | length > 0' "nested Spaces registry returns results"
 assert_jq "${spaces_response}" '.results[0].mediaType == "application/ai-skill"' "spaces result media type"
 assert_jq "${spaces_response}" '.results[0].metadata.sourceType == "huggingface-space"' "spaces source type"
 

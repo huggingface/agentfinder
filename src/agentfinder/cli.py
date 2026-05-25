@@ -31,36 +31,32 @@ from agentfinder.server import create_app
 console = Console()
 PACKAGE_NAME = "hf-agentfinder"
 DEFAULT_REGISTRY_URL = "https://evalstate-hf-agentfinder.hf.space"
-DEFAULT_SPACES_REGISTRY_URL = f"{DEFAULT_REGISTRY_URL}/registries/huggingface/spaces/search"
-SPEC_HELP = """Agent Finder discovers agent capabilities through REST registries.
+SPEC_HELP = """Find agent-ready Hugging Face Skills, Spaces, Servers.
 
-Search sends POST /search with {"query":{"text": "...", "mediaType": optional,
-"federation": "none|referrals|auto"}, "pageSize": n} and receives a SearchResponse
-containing results, optional referrals, and an optional pageToken.
+Search the registry and output Agent Finder results as JSON or human readable tables.
 
-Each result is an ai-catalog entry plus score/source. Use mediaType to decide how to
-consume it: application/ai-skill, application/mcp-server+json,
-application/a2a-agent-card+json, application/ai-catalog+json, or
-application/ai-registry+json. Entries contain exactly one of url or data. Fetch url
-artifacts directly; parse data inline. For application/ai-registry+json result or
-referral URLs, search that registry next (the URL may already be a /search endpoint).
+Find background removal MCP Servers:
+hf-agentfinder search "remove image background" --json --kind mcp
+
+Find Skills or MCP Servers to train a vision model:
+hf-agentfinder search "train a vision model" --json
+
+Use --kind skill|space|mcp to search fo a specific type.
+Use hf-agentfinder search --help for more information.
+
 """
 
 app = typer.Typer(
     help=f"Agent Finder registry adapters.\n\n{SPEC_HELP}",
-    epilog=(
-        "Challenge quickstart: run `agentfinder challenge serve --port 8090`, then "
-        '`agentfinder challenge search "find tools" --federation referrals --json`. '
-        "Hosted registry search: `agentfinder search QUERY`. "
-        "Generic registry search: `agentfinder search --registry-url URL QUERY`."
-    ),
+    # epilog=(
+    #     "Challenge quickstart: run `agentfinder challenge serve --port 8090`, then "
+    #     '`agentfinder challenge search "find tools" --federation referrals --json`. '
+    #     "Hosted registry search: `agentfinder search QUERY`. "
+    #     "Generic registry search: `agentfinder search --registry-url URL QUERY`."
+    # ),
     add_completion=False,
     invoke_without_command=True,
     no_args_is_help=True,
-)
-spaces_app = typer.Typer(
-    help=f"Search and expose Hugging Face Spaces as Agent Finder results.\n\n{SPEC_HELP}",
-    add_completion=False,
 )
 challenge_app = typer.Typer(
     help=(
@@ -71,7 +67,6 @@ challenge_app = typer.Typer(
     ),
     add_completion=False,
 )
-app.add_typer(spaces_app, name="spaces")
 app.add_typer(challenge_app, name="challenge")
 
 VersionOpt = Annotated[
@@ -305,15 +300,34 @@ def _search_response(
     )
 
 
-def _skills_search_response(
+def _combined_search_response(
     query: str,
     *,
     limit: int,
+    sdk: list[str] | None = None,
+    filters: list[str] | None = None,
+    include_non_running: bool = False,
+    token: bool | str | None = None,
+    base_url: str = DEFAULT_BASE_URL,
     kind: SpaceResultKind = "all",
 ) -> SearchResponse:
-    if kind not in {"all", "skill"}:
-        return SearchResponse(results=[])
-    return SearchResponse(results=search_hf_skills(query, limit=limit))
+    results: list[SearchResult] = []
+    if kind in {"all", "skill"}:
+        results.extend(search_hf_skills(query, limit=limit))
+    results.extend(
+        search_hf_spaces(
+            query,
+            limit=limit,
+            sdk=sdk,
+            filters=filters,
+            include_non_running=include_non_running,
+            token=token,
+            base_url=base_url,
+            kind=kind,
+        )
+    )
+    results.sort(key=lambda result: result.score, reverse=True)
+    return SearchResponse(results=results[:limit])
 
 
 def _result_type(result: SearchResult) -> str:
@@ -390,63 +404,17 @@ def search_alias(  # noqa: PLR0913 - Typer command surface intentionally maps CL
     base_url: BaseUrlOpt = DEFAULT_BASE_URL,
     kind: KindOpt = "all",
 ) -> None:
-    """Search the hosted registry, local Skills, or any Agent Finder registry.
+    """Search a registry (default Hugging Face).
 
     By default, POSTs an Agent Finder SearchRequest to the hosted hf-agentfinder registry.
-    Use --registry-url for any compatible registry, or --local for in-process Skills search.
-    With
-    --json, the CLI prints the registry's raw SearchResponse bytes instead of a
-    normalized/re-serialized model, so reading agents can inspect exact result, referral,
-    url, data, mediaType, and pageToken fields returned by the server.
-    """
-    if local:
-        _ = sdk, filters, include_non_running, token, base_url, federation
-        response = _skills_search_response(query, limit=limit, kind=kind)
-        raw_body = response.model_dump_json(exclude_none=True, exclude_defaults=True)
-        title = "Hugging Face Skills"
-    else:
-        registry_result = _registry_search(
-            registry_url,
-            query,
-            limit=limit,
-            kind=kind,
-            federation=federation,
-            token=token,
-        )
-        response = registry_result.response
-        raw_body = registry_result.raw_body
-        title = registry_url
-
-    if json_output:
-        _print_raw_json(raw_body)
-    else:
-        _print_results(response, title=title)
-
-
-@spaces_app.command("search")
-def spaces_search(  # noqa: PLR0913 - Typer command surface intentionally maps CLI options.
-    query: QueryArg,
-    limit: LimitOpt = 10,
-    sdk: SdkOpt = None,
-    filters: FilterOpt = None,
-    include_non_running: IncludeNonRunningOpt = False,
-    token: TokenOpt = None,
-    registry_url: RegistryUrlOpt = DEFAULT_SPACES_REGISTRY_URL,
-    local: LocalOpt = False,
-    federation: FederationOpt = "none",
-    json_output: JsonOpt = False,
-    base_url: BaseUrlOpt = DEFAULT_BASE_URL,
-    kind: KindOpt = "all",
-) -> None:
-    """Search hosted Spaces, local Spaces, or a remote Agent Finder registry.
-
-    Spec navigation: inspect each result's mediaType, then consume exactly one of url or
-    data. Search application/ai-registry+json URLs again to walk registry trees. Use
-    --federation referrals when querying registries that can suggest other registries.
+    Use --registry-url for any compatible registry, or --local for in-process combined
+    Skills and Spaces search. With --json, the CLI prints the registry's raw SearchResponse
+    bytes instead of a normalized/re-serialized model, so reading agents can inspect exact
+    result, referral, url, data, mediaType, and pageToken fields returned by the server.
     """
     if local:
         _ = federation
-        response = _search_response(
+        response = _combined_search_response(
             query,
             limit=limit,
             sdk=sdk,
@@ -457,7 +425,7 @@ def spaces_search(  # noqa: PLR0913 - Typer command surface intentionally maps C
             kind=kind,
         )
         raw_body = response.model_dump_json(exclude_none=True, exclude_defaults=True)
-        title = "Hugging Face Spaces"
+        title = "Hugging Face Skills and Spaces"
     else:
         registry_result = _registry_search(
             registry_url,
@@ -521,7 +489,7 @@ def serve(
     include_non_running: IncludeNonRunningOpt = False,
     token: TokenOpt = None,
 ) -> None:
-    """Serve Agent Finder registries for Hugging Face Skills and Spaces."""
+    """Start the Agent Finder server."""
     uvicorn.run(
         create_app(include_non_running=include_non_running, token=token),
         host=host,
@@ -534,5 +502,5 @@ def challenge_serve(
     host: Annotated[str, typer.Option("--host", help="Host to bind.")] = "127.0.0.1",
     port: Annotated[int, typer.Option("--port", "-p", help="Port to bind.")] = 8090,
 ) -> None:
-    """Serve deterministic mixed Agent Finder fixtures for client development."""
+    """Start Agent Finder test server with challenge fixtures."""
     uvicorn.run(create_challenge_app(), host=host, port=port)

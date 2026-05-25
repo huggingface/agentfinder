@@ -33,9 +33,6 @@ def test_package_exposes_hf_extension_console_script() -> None:
 
 def test_search_commands_default_to_hosted_registry_urls() -> None:
     search_parameters = signature(cli.search_alias).parameters
-    spaces_parameters = signature(cli.spaces_search).parameters
 
     assert search_parameters["registry_url"].default == cli.DEFAULT_REGISTRY_URL
-    assert spaces_parameters["registry_url"].default == cli.DEFAULT_SPACES_REGISTRY_URL
     assert search_parameters["local"].default is False
-    assert spaces_parameters["local"].default is False

@@ -207,6 +207,7 @@ class Searcher:
 class RecordingSearch:
     def __init__(self) -> None:
         self.tokens: list[bool | str | None] = []
+        self.queries: list[tuple[str, int, SpaceResultKind, str]] = []
 
     def __call__(
         self,
@@ -219,7 +220,26 @@ class RecordingSearch:
         base_url: str = "http://127.0.0.1:8080",
     ) -> list[SearchResult]:
         self.tokens.append(token)
-        return []
+        self.queries.append((query, limit, kind, base_url))
+        media_type = MCP_SERVER_MEDIA_TYPE if kind == "mcp" else AI_SKILL_MEDIA_TYPE
+        url = None if kind == "mcp" else f"{base_url}/skills/huggingface/alice/image-tool/SKILL.md"
+        data = (
+            {"name": "image-tool", "transport": "http", "url": "https://alice.hf.space/mcp"}
+            if kind == "mcp"
+            else None
+        )
+        return [
+            SearchResult(
+                identifier="urn:huggingface:skill:space:alice:image-tool",
+                displayName="Image Tool",
+                mediaType=media_type,
+                url=url,
+                data=data,
+                description="Edit images with a Space.",
+                score=91.0,
+                source="https://huggingface.co",
+            )
+        ]
 
 
 class RecordingSkillsSearch:
@@ -567,19 +587,44 @@ def test_nested_spaces_registry_routes_mcp_media_type_to_mcp_results() -> None:
     assert [result.mediaType for result in response.results] == [MCP_SERVER_MEDIA_TYPE]
 
 
-def test_agent_finder_search_uses_primary_skills_registry() -> None:
+def test_agent_finder_search_combines_skills_and_spaces_for_skill_requests() -> None:
     search_skills = RecordingSkillsSearch()
+    search_spaces = RecordingSearch()
 
     response = search_agent_finder(
         SearchRequest(
             query=SearchQuery(text="dataset upload", mediaType=AI_SKILL_MEDIA_TYPE),
             pageSize=3,
         ),
+        base_url="https://agentfinder.hf.space",
         search_skills=search_skills,
+        search_spaces=search_spaces,
     )
 
     assert search_skills.queries == [("dataset upload", 3)]
-    assert [result.displayName for result in response.results] == ["hf-cli"]
+    assert search_spaces.queries == [
+        ("dataset upload", 3, "skill", "https://agentfinder.hf.space")
+    ]
+    assert [result.displayName for result in response.results] == ["hf-cli", "Image Tool"]
+
+
+def test_agent_finder_search_routes_mcp_media_type_to_spaces_only() -> None:
+    search_skills = RecordingSkillsSearch()
+    search_spaces = RecordingSearch()
+
+    response = search_agent_finder(
+        SearchRequest(
+            query=SearchQuery(text="tool server", mediaType=MCP_SERVER_MEDIA_TYPE),
+            pageSize=3,
+        ),
+        search_skills=search_skills,
+        search_spaces=search_spaces,
+    )
+
+    assert search_skills.queries == []
+    assert search_spaces.queries == [("tool server", 3, "mcp", "http://127.0.0.1:8080")]
+    assert [result.displayName for result in response.results] == ["Image Tool"]
+    assert [result.mediaType for result in response.results] == [MCP_SERVER_MEDIA_TYPE]
 
 
 def test_agent_finder_search_returns_spaces_referral_when_requested() -> None:
@@ -594,6 +639,7 @@ def test_agent_finder_search_returns_spaces_referral_when_requested() -> None:
         ),
         base_url="https://agentfinder.hf.space",
         search_skills=lambda query, *, limit=10: [],
+        search_spaces=lambda query, **kwargs: [],
     )
 
     assert response.results == []
@@ -690,6 +736,25 @@ def test_search_route_forwards_effective_hf_token_to_search_stub() -> None:
         headers={"HF_TOKEN": "hf-token"},
     )
     second_response = client.post("/registries/huggingface/spaces/search", json=SEARCH_BODY)
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert search.tokens == ["hf-token", configured]
+
+
+def test_primary_search_route_forwards_effective_hf_token_to_spaces_search() -> None:
+    configured = "configured-token"
+    search = RecordingSearch()
+    client = TestClient(
+        create_app(
+            token=configured,
+            search_skills=lambda query, *, limit=10: [],
+            search_spaces=search,
+        )
+    )
+
+    first_response = client.post("/search", json=SEARCH_BODY, headers={"HF_TOKEN": "hf-token"})
+    second_response = client.post("/search", json=SEARCH_BODY)
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
