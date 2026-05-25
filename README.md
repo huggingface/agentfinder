@@ -42,9 +42,9 @@ slug convention.
 ### Release Automation
 
 Releases are built through the same quality gates as CI: locked dependency sync, Ruff
-format/lint checks, `ty` type checking, and pytest. The release check script then builds
-both source and wheel distributions, inspects the artifacts, and smoke-installs the wheel
-in a clean Python 3.14 virtual environment.
+format/lint checks, `ty` type checking, and pytest. The package supports the same minimum
+Python version as `huggingface_hub` (`>=3.10.0`). The hosted Hugging Face Space deployment
+uses Python 3.14 for runtime performance.
 
 Run the release check with:
 
@@ -77,16 +77,31 @@ the hosted Space lightweight while letting PyPI releases drive runtime updates.
 
 ## Usage
 
-```bash
-uv run agentfinder spaces search "generate image" --limit 5
-uv run agentfinder spaces search "generate image" --kind skill --json
-uv run agentfinder spaces search "generate image" --kind mcp --json
-uv run agentfinder spaces search "generate image" --json
-uv run agentfinder serve --port 8080
-```
+The examples below use the standalone `agentfinder` command form.
 
 ```bash
-curl -X POST http://localhost:8080/search \
+> agentfinder spaces search "generate image" --limit 5
+> agentfinder spaces search "generate image" --kind skill --json
+> agentfinder spaces search "generate image" --kind mcp --json
+> agentfinder spaces search "generate image" --json
+> agentfinder serve --port 8080
+```
+
+### Recommended `hf` extension usage
+
+For Hugging Face CLI users, the recommended install path is as an `hf` extension:
+
+```bash
+> hf extensions install huggingface/hf-agentfinder
+> hf agentfinder spaces search "generate image" --limit 5
+```
+
+The project still documents examples as `agentfinder ...` because the same CLI is also
+available as a standalone Python console script. When installed as an extension, replace
+`agentfinder` with `hf agentfinder`.
+
+```bash
+> curl -X POST http://localhost:8080/search \
   -H 'content-type: application/json' \
   -d '{"query":{"text":"remove background from image","mediaType":"application/ai-skill"},"pageSize":5}'
 ```
@@ -94,7 +109,7 @@ curl -X POST http://localhost:8080/search \
 Fetch a generated skill:
 
 ```bash
-curl http://localhost:8080/skills/huggingface/mcp-tools/FLUX.1-Kontext-Dev/SKILL.md
+> curl http://localhost:8080/skills/huggingface/mcp-tools/FLUX.1-Kontext-Dev/SKILL.md
 ```
 
 To get generic Hugging Face Space descriptors instead of skill wrappers, request:
