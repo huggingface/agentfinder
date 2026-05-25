@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated
+from dataclasses import dataclass
+from typing import Annotated, Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request as UrlRequest
@@ -27,16 +28,47 @@ from agentfinder.models import SearchQuery, SearchRequest, SearchResponse, Searc
 from agentfinder.server import create_app
 
 console = Console()
-app = typer.Typer(help="Agent Finder registry adapters.", add_completion=False)
-spaces_app = typer.Typer(help="Search and expose Hugging Face Spaces.", add_completion=False)
+SPEC_HELP = """Agent Finder discovers agent capabilities through REST registries.
+
+Search sends POST /search with {"query":{"text": "...", "mediaType": optional,
+"federation": "none|referrals|auto"}, "pageSize": n} and receives a SearchResponse
+containing results, optional referrals, and an optional pageToken.
+
+Each result is an ai-catalog entry plus score/source. Use mediaType to decide how to
+consume it: application/ai-skill, application/mcp-server+json,
+application/a2a-agent-card+json, application/ai-catalog+json, or
+application/ai-registry+json. Entries contain exactly one of url or data. Fetch url
+artifacts directly; parse data inline. For application/ai-registry+json result or
+referral URLs, search that registry next (the URL may already be a /search endpoint).
+"""
+
+app = typer.Typer(
+    help=f"Agent Finder registry adapters.\n\n{SPEC_HELP}",
+    epilog=(
+        "Challenge quickstart: run `agentfinder challenge serve --port 8090`, then "
+        '`agentfinder challenge search "find tools" --federation referrals --json`. '
+        "Generic registry search: `agentfinder search --registry-url URL QUERY`."
+    ),
+    add_completion=False,
+)
+spaces_app = typer.Typer(
+    help=f"Search and expose Hugging Face Spaces as Agent Finder results.\n\n{SPEC_HELP}",
+    add_completion=False,
+)
 challenge_app = typer.Typer(
-    help="Run deterministic Agent Finder challenge fixtures.",
+    help=(
+        "Run and query deterministic Agent Finder challenge fixtures.\n\n"
+        "The challenge server is intentionally useful for agents learning the spec: "
+        "it returns skills, MCP servers, A2A agents, inline ai-catalog bundles, "
+        "ai-registry entries, referrals, empty registries, and nested registries."
+    ),
     add_completion=False,
 )
 app.add_typer(spaces_app, name="spaces")
 app.add_typer(challenge_app, name="challenge")
 
-QueryArg = Annotated[str, typer.Argument(help="Natural-language Spaces search query.")]
+QueryArg = Annotated[str, typer.Argument(help="Natural-language Agent Finder search query.")]
+FederationMode = Literal["auto", "referrals", "none"]
 LimitOpt = Annotated[int, typer.Option("--limit", "-n", min=1, max=100, help="Maximum results.")]
 SdkOpt = Annotated[
     list[str] | None,
@@ -68,6 +100,18 @@ IncludeNonRunningOpt = Annotated[
     typer.Option("--include-non-running", help="Include Spaces that are not currently running."),
 ]
 JsonOpt = Annotated[bool, typer.Option("--json", help="Emit Agent Finder JSON response.")]
+FederationOpt = Annotated[
+    FederationMode,
+    typer.Option(
+        "--federation",
+        case_sensitive=False,
+        help=(
+            "Agent Finder federation mode to send in SearchRequest.query: none, "
+            "referrals, or auto. Use referrals/auto to ask registries for registry "
+            "referrals that a client can search next."
+        ),
+    ),
+]
 BaseUrlOpt = Annotated[
     str,
     typer.Option("--base-url", help="Base URL used for generated skill artifact URLs."),
@@ -83,6 +127,12 @@ KindOpt = Annotated[
         ),
     ),
 ]
+
+
+@dataclass(frozen=True)
+class RegistrySearchResult:
+    response: SearchResponse
+    raw_body: str
 
 
 def _registry_search_url(registry_url: str) -> str:
@@ -102,16 +152,17 @@ def _media_type_for_kind(kind: SpaceResultKind) -> str | None:
     return media_types[kind]
 
 
-def _registry_search_response(
+def _registry_search(
     registry_url: str,
     query: str,
     *,
     limit: int,
     kind: SpaceResultKind = "all",
+    federation: FederationMode = "none",
     token: str | None = None,
-) -> SearchResponse:
+) -> RegistrySearchResult:
     request_body = SearchRequest(
-        query=SearchQuery(text=query, mediaType=_media_type_for_kind(kind)),
+        query=SearchQuery(text=query, mediaType=_media_type_for_kind(kind), federation=federation),
         pageSize=limit,
     )
     headers = {
@@ -130,7 +181,11 @@ def _registry_search_response(
     )
     try:
         with urlopen(request, timeout=30) as response:  # noqa: S310
-            return SearchResponse.model_validate_json(response.read())
+            raw_body = response.read().decode("utf-8")
+            return RegistrySearchResult(
+                response=SearchResponse.model_validate_json(raw_body),
+                raw_body=raw_body,
+            )
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise typer.BadParameter(
@@ -142,6 +197,25 @@ def _registry_search_response(
             f"registry search failed: {exc}",
             param_hint="--registry-url",
         ) from exc
+
+
+def _registry_search_response(
+    registry_url: str,
+    query: str,
+    *,
+    limit: int,
+    kind: SpaceResultKind = "all",
+    federation: FederationMode = "none",
+    token: str | None = None,
+) -> SearchResponse:
+    return _registry_search(
+        registry_url,
+        query,
+        limit=limit,
+        kind=kind,
+        federation=federation,
+        token=token,
+    ).response
 
 
 def _search_response(
@@ -236,6 +310,11 @@ def _print_results(response: SearchResponse, *, title: str = "Search Results") -
     console.print(table)
 
 
+def _print_raw_json(raw_body: str) -> None:
+    console.file.write(raw_body)
+    console.file.write("\n")
+
+
 @app.command("search")
 def search_alias(  # noqa: PLR0913 - Typer command surface intentionally maps CLI options.
     query: QueryArg,
@@ -245,27 +324,38 @@ def search_alias(  # noqa: PLR0913 - Typer command surface intentionally maps CL
     include_non_running: IncludeNonRunningOpt = False,
     token: TokenOpt = None,
     registry_url: RegistryUrlOpt = None,
+    federation: FederationOpt = "none",
     json_output: JsonOpt = False,
     base_url: BaseUrlOpt = DEFAULT_BASE_URL,
     kind: KindOpt = "all",
 ) -> None:
-    """Search the primary Hugging Face Skills registry or a remote Agent Finder registry."""
+    """Search Skills or any Agent Finder registry.
+
+    Remote registry mode POSTs an Agent Finder SearchRequest to --registry-url. With
+    --json, the CLI prints the registry's raw SearchResponse bytes instead of a
+    normalized/re-serialized model, so reading agents can inspect exact result, referral,
+    url, data, mediaType, and pageToken fields returned by the server.
+    """
     if registry_url is None:
-        _ = sdk, filters, include_non_running, token, base_url
+        _ = sdk, filters, include_non_running, token, base_url, federation
         response = _skills_search_response(query, limit=limit, kind=kind)
+        raw_body = response.model_dump_json(exclude_none=True, exclude_defaults=True)
         title = "Hugging Face Skills"
     else:
-        response = _registry_search_response(
+        registry_result = _registry_search(
             registry_url,
             query,
             limit=limit,
             kind=kind,
+            federation=federation,
             token=token,
         )
+        response = registry_result.response
+        raw_body = registry_result.raw_body
         title = registry_url
 
     if json_output:
-        console.print_json(response.model_dump_json(exclude_none=True, exclude_defaults=True))
+        _print_raw_json(raw_body)
     else:
         _print_results(response, title=title)
 
@@ -279,12 +369,19 @@ def spaces_search(  # noqa: PLR0913 - Typer command surface intentionally maps C
     include_non_running: IncludeNonRunningOpt = False,
     token: TokenOpt = None,
     registry_url: RegistryUrlOpt = None,
+    federation: FederationOpt = "none",
     json_output: JsonOpt = False,
     base_url: BaseUrlOpt = DEFAULT_BASE_URL,
     kind: KindOpt = "all",
 ) -> None:
-    """Search Hugging Face Spaces and return Agent Finder-shaped results."""
+    """Search Hugging Face Spaces or a remote Agent Finder registry.
+
+    Spec navigation: inspect each result's mediaType, then consume exactly one of url or
+    data. Search application/ai-registry+json URLs again to walk registry trees. Use
+    --federation referrals when querying registries that can suggest other registries.
+    """
     if registry_url is None:
+        _ = federation
         response = _search_response(
             query,
             limit=limit,
@@ -295,21 +392,62 @@ def spaces_search(  # noqa: PLR0913 - Typer command surface intentionally maps C
             base_url=base_url,
             kind=kind,
         )
+        raw_body = response.model_dump_json(exclude_none=True, exclude_defaults=True)
         title = "Hugging Face Spaces"
     else:
-        response = _registry_search_response(
+        registry_result = _registry_search(
             registry_url,
             query,
             limit=limit,
             kind=kind,
+            federation=federation,
             token=token,
         )
+        response = registry_result.response
+        raw_body = registry_result.raw_body
         title = registry_url
 
     if json_output:
-        console.print_json(response.model_dump_json(exclude_none=True, exclude_defaults=True))
+        _print_raw_json(raw_body)
     else:
         _print_results(response, title=title)
+
+
+@challenge_app.command("search")
+def challenge_search(
+    query: QueryArg,
+    registry_url: Annotated[
+        str,
+        typer.Option(
+            "--registry-url",
+            help=(
+                "Challenge registry URL. May be the server base URL or a nested /search URL "
+                "such as http://127.0.0.1:8090/registries/tools/search."
+            ),
+        ),
+    ] = "http://127.0.0.1:8090",
+    limit: LimitOpt = 10,
+    kind: KindOpt = "all",
+    federation: FederationOpt = "referrals",
+    json_output: JsonOpt = False,
+) -> None:
+    """Query a running challenge server.
+
+    Defaults to the local `agentfinder challenge serve` endpoint and requests referrals.
+    Reading agents should use --json to see the raw SearchResponse, follow referrals and
+    application/ai-registry+json result URLs, fetch url artifacts, and parse inline data.
+    """
+    registry_result = _registry_search(
+        registry_url,
+        query,
+        limit=limit,
+        kind=kind,
+        federation=federation,
+    )
+    if json_output:
+        _print_raw_json(registry_result.raw_body)
+    else:
+        _print_results(registry_result.response, title=registry_url)
 
 
 @app.command("serve")

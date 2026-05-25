@@ -68,6 +68,14 @@ agents, ai-catalog bundles, registry entries, referrals, empty registries, and n
 registries. Use it to test clients that need to follow registry trees and fetch referenced
 artifacts without relying on Hugging Face or Meilisearch services.
 
+`agentfinder challenge search` queries a running challenge registry and defaults to
+requesting referrals, making it a convenient CLI path for agents that need to practice
+Agent Finder traversal. The generic `agentfinder search --registry-url ...` and
+`agentfinder spaces search --registry-url ...` commands also accept `--federation
+none|referrals|auto`. When those registry-backed commands are run with `--json`, the CLI
+prints the registry's raw `SearchResponse` body so clients can inspect exact `results`,
+`referrals`, `mediaType`, `url`, `data`, and `pageToken` fields returned by the server.
+
 ### Release Automation
 
 Releases are built through the same quality gates as CI: locked dependency sync, Ruff
@@ -130,6 +138,7 @@ The examples below use the standalone `agentfinder` command form.
 > agentfinder search --registry-url https://registry.example "generate image" --kind skill --json
 > agentfinder serve --port 8080
 > agentfinder challenge serve --port 8090
+> agentfinder challenge search "find tools and registries" --federation referrals --json
 ```
 
 ### Recommended `hf` extension usage

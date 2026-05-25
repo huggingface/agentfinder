@@ -86,11 +86,17 @@ agent descriptor field in the semantic-search response. Therefore:
 ## MCP endpoint materialization
 
 The SDK source also does not expose a typed MCP endpoint URL for Spaces. MCP-tagged Gradio
-Spaces expose an MCP SSE endpoint under the Space app URL:
+Spaces expose an HTTP MCP endpoint under the Space app URL:
 
 ```text
-https://{space-slug}.hf.space/gradio_api/mcp/sse
+https://{space-host}/gradio_api/mcp/
 ```
+
+Prefer the domain returned in semantic-search runtime metadata
+(`runtime.domains[].domain`) when present. If runtime domains are absent, fall back to the
+standard `.hf.space` slug convention. `huggingface_hub.SpaceInfo` exposes `host` and
+`subdomain`, but using `space_info()` for every search result would require an additional
+Hub request per result; runtime domains are available in the raw semantic-search response.
 
 The Agent Finder mapping is:
 
@@ -99,8 +105,8 @@ The Agent Finder mapping is:
   "mediaType": "application/mcp-server+json",
   "data": {
     "name": "hf-space-mcp-tools-flux-1-kontext-dev",
-    "transport": "sse",
-    "url": "https://mcp-tools-flux-1-kontext-dev.hf.space/gradio_api/mcp/sse"
+    "transport": "http",
+    "url": "https://mcp-tools-flux-1-kontext-dev.hf.space/gradio_api/mcp/"
   }
 }
 ```
