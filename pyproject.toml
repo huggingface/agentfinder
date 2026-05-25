@@ -3,7 +3,7 @@ name = "hf-agentfinder"
 version = "0.1.4"
 description = "Agent Finder registry adapter for Hugging Face Spaces"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.10.0"
 dependencies = [
     "fastapi==0.136.1",
     "huggingface-hub==1.14.0",
@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 agentfinder = "agentfinder.cli:app"
+hf-agentfinder = "agentfinder.cli:app"
 
 [dependency-groups]
 dev = [
@@ -32,7 +33,7 @@ packages = ["src/agentfinder"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py314"
+target-version = "py310"
 extend-exclude = [
     ".agents",
     ".codex",
@@ -76,7 +77,7 @@ max-statements = 40
 line-ending = "lf"
 
 [tool.ty.environment]
-python-version = "3.14"
+python-version = "3.10"
 root = ["./src"]
 
 [tool.ty.src]

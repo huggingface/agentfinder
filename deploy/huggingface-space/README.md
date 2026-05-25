@@ -12,7 +12,8 @@ base_path: /docs
 
 Agent Finder registry adapter for Hugging Face Spaces.
 
-This Docker Space runs the latest published `hf-agentfinder` package on container start:
+This Docker Space runs the latest published `hf-agentfinder` package on Python 3.14 at
+container start:
 
 ```bash
 uvx --refresh --from hf-agentfinder agentfinder serve --host 0.0.0.0 --port 7860
