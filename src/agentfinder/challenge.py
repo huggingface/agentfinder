@@ -252,9 +252,7 @@ def _filter_results(
 ) -> list[SearchResult]:
     media_type = request.query.mediaType
     filtered = [
-        result
-        for result in results
-        if media_type is None or result.mediaType == media_type
+        result for result in results if media_type is None or result.mediaType == media_type
     ]
     ranked = [
         result.model_copy(update={"score": _score(result, request.query.text, index)})

@@ -30,6 +30,8 @@ from agentfinder.server import create_app
 
 console = Console()
 PACKAGE_NAME = "hf-agentfinder"
+DEFAULT_REGISTRY_URL = "https://evalstate-hf-agentfinder.hf.space"
+DEFAULT_SPACES_REGISTRY_URL = f"{DEFAULT_REGISTRY_URL}/registries/huggingface/spaces/search"
 SPEC_HELP = """Agent Finder discovers agent capabilities through REST registries.
 
 Search sends POST /search with {"query":{"text": "...", "mediaType": optional,
@@ -49,6 +51,7 @@ app = typer.Typer(
     epilog=(
         "Challenge quickstart: run `agentfinder challenge serve --port 8090`, then "
         '`agentfinder challenge search "find tools" --federation referrals --json`. '
+        "Hosted registry search: `agentfinder search QUERY`. "
         "Generic registry search: `agentfinder search --registry-url URL QUERY`."
     ),
     add_completion=False,
@@ -84,32 +87,50 @@ FederationMode = Literal["auto", "referrals", "none"]
 LimitOpt = Annotated[int, typer.Option("--limit", "-n", min=1, max=100, help="Maximum results.")]
 SdkOpt = Annotated[
     list[str] | None,
-    typer.Option("--sdk", help="Filter by Space SDK. May be passed multiple times."),
+    typer.Option(
+        "--sdk", help="Local Spaces search only. Filter by Space SDK. May be passed multiple times."
+    ),
 ]
 FilterOpt = Annotated[
     list[str] | None,
-    typer.Option("--filter", "-f", help="Filter by Space tag. May be passed multiple times."),
+    typer.Option(
+        "--filter",
+        "-f",
+        help="Local Spaces search only. Filter by Space tag. May be passed multiple times.",
+    ),
 ]
 TokenOpt = Annotated[
     str | None,
     typer.Option(
         "--token",
-        help="Hugging Face access token, or registry Bearer token when --registry-url is used.",
+        help=(
+            "Registry Bearer token. Also used as a Hugging Face token for local Spaces search "
+            "or compatible hosted Spaces registries."
+        ),
     ),
 ]
 RegistryUrlOpt = Annotated[
-    str | None,
+    str,
     typer.Option(
         "--registry-url",
         help=(
-            "Agent Finder registry URL to query instead of Hugging Face Spaces. "
-            "May be a registry base URL or its /search endpoint."
+            "Agent Finder registry URL to query. May be a registry base URL or its /search "
+            "endpoint. Defaults to the hosted hf-agentfinder deployment."
         ),
     ),
 ]
 IncludeNonRunningOpt = Annotated[
     bool,
-    typer.Option("--include-non-running", help="Include Spaces that are not currently running."),
+    typer.Option(
+        "--include-non-running", help="Local Spaces search only. Include non-running Spaces."
+    ),
+]
+LocalOpt = Annotated[
+    bool,
+    typer.Option(
+        "--local",
+        help="Search directly from this process instead of using an Agent Finder registry URL.",
+    ),
 ]
 JsonOpt = Annotated[bool, typer.Option("--json", help="Emit Agent Finder JSON response.")]
 FederationOpt = Annotated[
@@ -126,7 +147,9 @@ FederationOpt = Annotated[
 ]
 BaseUrlOpt = Annotated[
     str,
-    typer.Option("--base-url", help="Base URL used for generated skill artifact URLs."),
+    typer.Option(
+        "--base-url", help="Local Spaces search only. Base URL used for generated skill URLs."
+    ),
 ]
 KindOpt = Annotated[
     SpaceResultKind,
@@ -360,20 +383,23 @@ def search_alias(  # noqa: PLR0913 - Typer command surface intentionally maps CL
     filters: FilterOpt = None,
     include_non_running: IncludeNonRunningOpt = False,
     token: TokenOpt = None,
-    registry_url: RegistryUrlOpt = None,
+    registry_url: RegistryUrlOpt = DEFAULT_REGISTRY_URL,
+    local: LocalOpt = False,
     federation: FederationOpt = "none",
     json_output: JsonOpt = False,
     base_url: BaseUrlOpt = DEFAULT_BASE_URL,
     kind: KindOpt = "all",
 ) -> None:
-    """Search Skills or any Agent Finder registry.
+    """Search the hosted registry, local Skills, or any Agent Finder registry.
 
-    Remote registry mode POSTs an Agent Finder SearchRequest to --registry-url. With
+    By default, POSTs an Agent Finder SearchRequest to the hosted hf-agentfinder registry.
+    Use --registry-url for any compatible registry, or --local for in-process Skills search.
+    With
     --json, the CLI prints the registry's raw SearchResponse bytes instead of a
     normalized/re-serialized model, so reading agents can inspect exact result, referral,
     url, data, mediaType, and pageToken fields returned by the server.
     """
-    if registry_url is None:
+    if local:
         _ = sdk, filters, include_non_running, token, base_url, federation
         response = _skills_search_response(query, limit=limit, kind=kind)
         raw_body = response.model_dump_json(exclude_none=True, exclude_defaults=True)
@@ -405,19 +431,20 @@ def spaces_search(  # noqa: PLR0913 - Typer command surface intentionally maps C
     filters: FilterOpt = None,
     include_non_running: IncludeNonRunningOpt = False,
     token: TokenOpt = None,
-    registry_url: RegistryUrlOpt = None,
+    registry_url: RegistryUrlOpt = DEFAULT_SPACES_REGISTRY_URL,
+    local: LocalOpt = False,
     federation: FederationOpt = "none",
     json_output: JsonOpt = False,
     base_url: BaseUrlOpt = DEFAULT_BASE_URL,
     kind: KindOpt = "all",
 ) -> None:
-    """Search Hugging Face Spaces or a remote Agent Finder registry.
+    """Search hosted Spaces, local Spaces, or a remote Agent Finder registry.
 
     Spec navigation: inspect each result's mediaType, then consume exactly one of url or
     data. Search application/ai-registry+json URLs again to walk registry trees. Use
     --federation referrals when querying registries that can suggest other registries.
     """
-    if registry_url is None:
+    if local:
         _ = federation
         response = _search_response(
             query,

@@ -13,11 +13,12 @@ import json
 import shutil
 import subprocess
 import sys
-import tomllib
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SETTINGS = ROOT / "agentfinder.toml"

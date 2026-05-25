@@ -42,7 +42,7 @@ echo "==> Type checking"
 uv run ty check
 
 echo "==> Running tests"
-uv run pytest
+uv run python -m pytest
 
 echo "==> Building source distribution and wheel"
 uv build --clear

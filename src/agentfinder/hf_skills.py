@@ -52,11 +52,7 @@ def _skill_identifier(skill: str) -> str:
 
 
 def _skill_url(hit: dict[str, Any]) -> str:
-    return (
-        _string(hit, "url")
-        or _string(hit, "raw_url")
-        or f"{HF_SKILLS_SOURCE}/tree/main"
-    )
+    return _string(hit, "url") or _string(hit, "raw_url") or f"{HF_SKILLS_SOURCE}/tree/main"
 
 
 def _search_result_from_hit(hit: dict[str, Any]) -> SearchResult:

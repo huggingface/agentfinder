@@ -6,6 +6,7 @@ It exposes Hugging Face discovery as:
 
 - a CLI: `agentfinder spaces search "remove background from image"`
 - version introspection: `agentfinder --version`
+- a hosted Agent Finder registry client: `agentfinder search "remove background from image"`
 - a generic Agent Finder registry client: `agentfinder search --registry-url https://registry.example "remove background from image"`
 - a primary Agent Finder REST API for indexed Hugging Face Skills: `POST /search`
 - a nested Hugging Face Spaces registry: `POST /registries/huggingface/spaces/search`
@@ -44,10 +45,12 @@ using HTTP transport. When Hub runtime metadata includes a Space domain, that do
 used for app and MCP URLs; otherwise the adapter falls back to the standard `.hf.space`
 slug convention.
 
-The CLI can also query any Agent Finder-compatible registry by passing `--registry-url`.
-The value may be either a registry base URL or the `/search` endpoint. In this mode the CLI
-POSTs an Agent Finder `SearchRequest` and renders the returned `SearchResponse` using the
-same JSON/table output paths as the Hugging Face Spaces adapter.
+The CLI queries the hosted hf-agentfinder deployment by default and can query any Agent
+Finder-compatible registry by passing `--registry-url`. The value may be either a registry
+base URL or the `/search` endpoint. In this mode the CLI POSTs an Agent Finder
+`SearchRequest` and renders the returned `SearchResponse` using the same JSON/table output
+paths as the Hugging Face Spaces adapter. Pass `--local` to search directly from the
+current process instead.
 
 ### Skills Registry and Referrals
 
@@ -71,8 +74,8 @@ artifacts without relying on Hugging Face or Meilisearch services.
 
 `agentfinder challenge search` queries a running challenge registry and defaults to
 requesting referrals, making it a convenient CLI path for agents that need to practice
-Agent Finder traversal. The generic `agentfinder search --registry-url ...` and
-`agentfinder spaces search --registry-url ...` commands also accept `--federation
+Agent Finder traversal. The generic `agentfinder search` and `agentfinder spaces search`
+commands default to the hosted deployment and also accept `--registry-url` and `--federation
 none|referrals|auto`. When those registry-backed commands are run with `--json`, the CLI
 prints the registry's raw `SearchResponse` body so clients can inspect exact `results`,
 `referrals`, `mediaType`, `url`, `data`, and `pageToken` fields returned by the server.
@@ -133,11 +136,13 @@ The examples below use the standalone `agentfinder` command form.
 
 ```bash
 > agentfinder --version
+> agentfinder search "generate image" --limit 5
 > agentfinder spaces search "generate image" --limit 5
 > agentfinder spaces search "generate image" --kind skill --json
 > agentfinder spaces search "generate image" --kind mcp --json
 > agentfinder spaces search "generate image" --json
 > agentfinder search --registry-url https://registry.example "generate image" --kind skill --json
+> agentfinder spaces search "generate image" --local
 > agentfinder serve --port 8080
 > agentfinder challenge serve --port 8090
 > agentfinder challenge search "find tools and registries" --federation referrals --json
