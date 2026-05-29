@@ -272,9 +272,7 @@ def test_space_to_search_result_defaults_to_skill_wrapper() -> None:
     assert result.identifier == "urn:ai:hf.co:skill:space:alice:cool.space"
     assert result.displayName == "Image Tool"
     assert result.type == AI_SKILL_MEDIA_TYPE
-    assert result.url == (
-        f"{SPACES_URL_PREFIX}/skills/huggingface/alice/cool.space/SKILL.md"
-    )
+    assert result.url == (f"{SPACES_URL_PREFIX}/skills/huggingface/alice/cool.space/SKILL.md")
     assert result.description == "Generate and edit images."
     assert result.score == 91.0
     assert result.source == "https://huggingface.co"
